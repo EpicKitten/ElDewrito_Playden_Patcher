@@ -64,6 +64,29 @@ What the lines can say:
    without them.
 3. Launch the game.
 
+### Patching a copy that is already on the PS5
+
+If the game is already in Playden, `patch_console.py` patches it where it is,
+so nothing has to be imported again:
+
+```
+python patch_console.py 192.168.1.50 --dry-run
+python patch_console.py 192.168.1.50
+```
+
+Give it your console's address (or set `PS5_HOST`). It needs the DevLoop
+payload (`ps5loop`, port 9112) loaded on the console, and the game closed.
+
+- It finds the folder with `eldorado.exe` under `/data/playden-games`; if
+  there is more than one, name it with `--game`.
+- It fetches only the files the patcher changes (about 6 MB), runs the same
+  steps on them on the PC, and sends back the ones that came out different.
+  `--dry-run` shows that list and sends nothing.
+- The originals of the files it replaces are kept on the PC, in
+  `console_backup/` next to the script, because the payload cannot make
+  folders on the console. `--undo` sends them back.
+- `--no-glyphs` works as it does for `patch_for_ps5.py`.
+
 ### Options
 
 | Command | What it does |
@@ -198,6 +221,7 @@ instead of the drawn version.
 | --- | --- |
 | `patch_for_ps5.py` | Applies everything above to a chosen game folder; `--undo` reverses it, apart from the settings |
 | `dewbridge.dll` | The compiled bridge the script installs |
+| `patch_console.py` | Applies the same steps to a copy already on the PS5, through the DevLoop payload |
 | `dualsense_controller.png` | The DualSense photo, cut out and with label lines, that the script installs |
 | `make_controller_pic.py` | Rebuilds `dualsense_controller.png` from the original photo; needs Pillow |
 | `dewbridge.c` | The bridge's source |
