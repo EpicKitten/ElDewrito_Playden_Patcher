@@ -19,7 +19,8 @@ What it does, each step only if not already done:
    with PS5 (DualSense) ones. The originals are kept in
    ui/assets/buttons_xbox_orig. In Settings > Controls the buttons are listed
    by their PS5 names and the Xbox controller photo becomes a DualSense
-   drawing (originals kept as settings.js.xbox_orig, controller.png.xbox_orig).
+   photo, with the labels around it moved to match (originals kept as
+   settings.js.xbox_orig, controller.png.xbox_orig, settings.css.xbox_orig).
    Skip all of this with --no-glyphs.
 
 It does not set the launch arguments. In Playden, give the game:
@@ -303,29 +304,15 @@ GLYPHS = {
 def _png(layers, width=100, height=100):
     """Draw the layers (distance function, colour), in order, as an RGBA PNG.
     The layers are laid out on a 100x100 square, scaled to fit and centred."""
-    return _render(layers, width, height, 100, 100)
-
-
-def _render(layers, width, height, design_w, design_h, comment=None):
-    """Draw layers laid out on design_w x design_h, scaled to fit and centred.
-    A layer may carry a third item, the box (x0, y0, x1, y1) in design units
-    outside which it draws nothing; that only saves time."""
-    scale = min(float(width) / design_w, float(height) / design_h)
-    ox, oy = (width - design_w * scale) / 2.0, (height - design_h * scale) / 2.0
+    scale = min(width, height) / 100.0
+    ox, oy = (width - 100 * scale) / 2.0, (height - 100 * scale) / 2.0
     zero = bytes(4 * width * height)
     red, green, blue, alpha = (array('f', zero) for _ in range(4))   # premultiplied
-    for layer in layers:
-        f, (cr, cg, cb) = layer[0], layer[1]
-        x0, y0, x1, y1 = 0, 0, width, height
-        if len(layer) > 2:
-            box = layer[2]
-            x0, y0 = max(0, int(box[0] * scale + ox) - 1), max(0, int(box[1] * scale + oy) - 1)
-            x1 = min(width, int(box[2] * scale + ox) + 2)
-            y1 = min(height, int(box[3] * scale + oy) + 2)
-        for y in range(y0, y1):
+    for f, (cr, cg, cb) in layers:
+        for y in range(height):
             py = (y + 0.5 - oy) / scale
-            i = y * width + x0
-            for x in range(x0, x1):
+            i = y * width
+            for x in range(width):
                 cov = 0.5 - f(((x + 0.5 - ox) / scale, py)) * scale
                 if cov > 0:
                     if cov >= 1:
@@ -354,7 +341,6 @@ def _render(layers, width, height, design_w, design_h, comment=None):
                 + struct.pack('>I', zlib.crc32(kind + body)))
     return (b'\x89PNG\r\n\x1a\n'
             + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
-            + (chunk(b'tEXt', b'Comment\0' + comment) if comment else b'')
             + chunk(b'IDAT', zlib.compress(bytes(rows), 9))
             + chunk(b'IEND', b''))
 
@@ -436,9 +422,11 @@ def patch_glyphs(folder):
 # The controller tab lists the buttons by their Xbox names in every binding
 # drop-down, and shows a photo of an Xbox One pad with lines out to the labels.
 # The names are changed where they are displayed only: the values the page
-# sends to the game stay "A", "LB", ... The photo is replaced by a drawing of a
-# DualSense whose lines leave the picture at the same places, so the page's
-# labels still line up.
+# sends to the game stay "A", "LB", ... The photo is replaced by one of a
+# DualSense (dualsense_controller.png next to this script, built by
+# make_controller_pic.py). A DualSense has its d-pad and left stick the other
+# way round and its Options button on the right, so some labels also change
+# places in settings.css to keep the lines from crossing.
 
 KEPT = '.xbox_orig'
 SETTINGS_JS = os.path.join('ui', 'screens', 'settings', 'settings.js')
@@ -448,92 +436,28 @@ NAME_NEW = (b"opt.textContent = ({A:'Cross',B:'Circle',X:'Square',Y:'Triangle',"
             b"LS:'L3',RS:'R3'})[buttons[x]] || buttons[x];")
 
 CONTROLLER_PIC = os.path.join('ui', 'assets', 'settings', 'controller.png')
-CONTROLLER_SIZE = (1024, 670)
-CONTROLLER_MARK = b'patch_for_ps5 DualSense 1'      # change when the drawing changes
-
-# label lines: where each leaves the picture (first point, as in the Xbox
-# photo) to the button it names (last point)
-LEADERS = [
-    [(268, 40), (268, 122)],                                            # LT -> L2
-    [(765, 40), (765, 122)],                                            # RT -> R2
-    [(125, 113), (178, 160)],                                           # LB -> L1
-    [(908, 113), (850, 160)],                                           # RB -> R1
-    [(83, 235), (648, 235), (662, 220)],                                # Start -> Options
-    [(33, 285), (120, 285), (145, 260), (322, 260), (354, 224)],        # Back -> Create
-    [(5, 345), (112, 345), (167, 290), (292, 290), (346, 400)],         # LS
-    [(5, 437), (118, 437), (158, 397), (158, 340), (178, 322), (226, 324)],   # Up
-    [(10, 513), (150, 513), (196, 364)],                                # Left
-    [(20, 600), (205, 600), (232, 398)],                                # Down
-    [(430, 630), (430, 585), (300, 455), (270, 364)],                   # Right
-    [(965, 232), (752, 232), (725, 259), (725, 321)],                   # X -> Square
-    [(985, 308), (842, 308), (822, 290), (805, 290)],                   # Y -> Triangle
-    [(1005, 380), (872, 380), (854, 362)],                              # B -> Circle
-    [(1020, 453), (832, 453), (798, 418)],                              # A -> Cross
-    [(1010, 548), (735, 548), (672, 458)],                              # RS
-]
+CONTROLLER_SRC = os.path.join(HERE, 'dualsense_controller.png')
+SETTINGS_CSS = os.path.join('ui', 'screens', 'settings', 'settings.css')
+LABELS_MARK = b'/* patch_for_ps5: controller labels placed for the DualSense picture */'
+# label -> the label whose place on the page it takes
+LABEL_MOVES = {'Back': 'Start', 'Up': 'Back', 'Left': 'LS', 'Down': 'Up', 'Right': 'Left',
+               'LS': 'Down', 'RS': 'Right', 'Start': 'X', 'X': 'RS'}
 
 
-def _boxed(f, colour, x0, y0, x1, y1):
-    return (f, colour, (x0, y0, x1, y1))
-
-
-def _around(c, r, f, colour):
-    return _boxed(f, colour, c[0] - r, c[1] - r, c[0] + r, c[1] + r)
-
-
-def _controller_layers():
-    shell, edge, dark, mid = (232, 235, 240), (140, 146, 158), (38, 40, 48), (96, 100, 112)
-    layers = []
-
-    for side in (1, -1):                                 # left, then mirrored right
-        def mx(x):
-            return 512 - side * (512 - x)
-        layers.append(_around((mx(240), 128), 70, _box((mx(240), 128), (60, 34), 24), dark))   # L2
-        layers.append(_around((mx(232), 172), 95, _box((mx(232), 172), (88, 26), 20), mid))    # L1
-
-    grips = [_line([(200, 420), (172, 565)], 156), _line([(824, 420), (852, 565)], 156)]
-    middle = _box((512, 340), (395, 165), 120)
-
-    def body(p):
-        return min(middle(p), grips[0](p), grips[1](p))
-    layers.append(_boxed(body, shell, 85, 165, 939, 652))
-    layers.append(_boxed(_outline(body, 3), edge, 85, 165, 939, 652))
-
-    layers.append(_boxed(_box((512, 262), (118, 78), 22), (58, 61, 72), 390, 180, 634, 344))   # touchpad
-    for x in (360, 664):                                 # Create, Options
-        layers.append(_around((x, 212), 20, _box((x, 212), (8, 17), 8), dark))
-    layers.append(_around((512, 430), 17, _disc((512, 430), 15), dark))                        # PS
-
-    def cross(p):
-        return min(_box((232, 358), (48, 17), 5)(p), _box((232, 358), (17, 48), 5)(p))
-    layers.append(_around((232, 358), 50, cross, dark))
-
-    for c in ((380, 430), (644, 430)):                   # sticks
-        layers.append(_around(c, 54, _disc(c, 52), dark))
-        layers.append(_around(c, 40, _outline(_disc(c, 34), 4), mid))
-
-    def face(c, symbol, colour):
-        layers.append(_around(c, 28, _disc(c, 26), dark))
-        layers.append(_around(c, 18, symbol, colour))
-    x, y = 780, 290
-    face((x, y), _line([(x, y - 12), (x + 12, y + 9), (x - 12, y + 9)], 4, closed=True), (64, 226, 160))
-    x, y = 835, 345
-    face((x, y), _outline(_disc((x, y), 11), 4), (255, 102, 102))
-    x, y = 780, 400
-    face((x, y), lambda p, x=x, y=y: min(_line([(x - 10, y - 10), (x + 10, y + 10)], 4)(p),
-                                         _line([(x - 10, y + 10), (x + 10, y - 10)], 4)(p)),
-         (124, 178, 232))
-    x, y = 725, 345
-    face((x, y), _outline(_box((x, y), (10, 10), 1), 4), (234, 130, 220))
-
-    for pts in LEADERS:
-        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-        box = (min(xs) - 12, min(ys) - 12, max(xs) + 12, max(ys) + 12)
-        end = pts[-1]
-        for width, radius, colour in ((8, 9.5, (20, 22, 28)), (3.5, 6.5, WHITE)):
-            layers.append((_line(pts, width), colour, box))
-            layers.append(_around(end, radius + 1, _disc(end, radius), colour))
-    return layers
+def move_labels(css):
+    """settings.css with the label rules swapped round, or None if it is not
+    laid out as expected."""
+    rules = {}
+    for name in LABEL_MOVES:
+        found = list(re.finditer(rb'(?m)^#' + name.encode() + rb'[ \t]*\{([^{}]*)\}', css))
+        if len(found) != 1:
+            return None
+        rules[name] = found[0]
+    out, pos = [LABELS_MARK, b'\r\n' if b'\r\n' in css else b'\n'], 0
+    for name, m in sorted(rules.items(), key=lambda item: item[1].start()):
+        out += [css[pos:m.start(1)], rules[LABEL_MOVES[name]].group(1)]
+        pos = m.end(1)
+    return b''.join(out) + css[pos:]
 
 
 def _keep_and_write(path, data):
@@ -559,25 +483,37 @@ def patch_button_names(folder):
 
 def patch_controller_pic(folder):
     path = os.path.join(folder, CONTROLLER_PIC)
-    if not os.path.isfile(path):
-        return 'controller picture: %s not found, skipped' % CONTROLLER_PIC
+    css_path = os.path.join(folder, SETTINGS_CSS)
+    for rel in (CONTROLLER_PIC, SETTINGS_CSS):
+        if not os.path.isfile(os.path.join(folder, rel)):
+            return 'controller picture: %s not found, skipped' % rel
+    source = os.path.join(GLYPH_OVERRIDES, 'controller.png')
+    if not os.path.isfile(source):
+        source = CONTROLLER_SRC
+    if not os.path.isfile(source):
+        return 'controller picture: dualsense_controller.png is not next to this script, skipped'
+    with open(source, 'rb') as f:
+        new = f.read()
     with open(path, 'rb') as f:
         data = f.read()
-    override = os.path.join(GLYPH_OVERRIDES, 'controller.png')
-    if os.path.isfile(override):
-        with open(override, 'rb') as f:
-            new = f.read()
-        if data == new:
-            return 'controller picture: already PS5'
-    elif CONTROLLER_MARK in data[:200]:
-        return 'controller picture: already PS5'
-    elif not os.path.exists(path + KEPT) and png_size(data) != CONTROLLER_SIZE:
-        return 'controller picture: %s is not as expected, left alone' % CONTROLLER_PIC
+    with open(css_path, 'rb') as f:
+        css = f.read()
+
+    # the picture and the label places go together: both or neither
+    if LABELS_MARK in css:
+        new_css = css
     else:
-        new = _render(_controller_layers(), CONTROLLER_SIZE[0], CONTROLLER_SIZE[1],
-                      CONTROLLER_SIZE[0], CONTROLLER_SIZE[1], CONTROLLER_MARK)
-    _keep_and_write(path, new)
-    return 'controller picture: DualSense drawing (original kept as controller.png%s)' % KEPT
+        new_css = move_labels(css)
+        if new_css is None:
+            return 'controller picture: %s is not as expected, picture left alone' % SETTINGS_CSS
+    if data == new and new_css == css:
+        return 'controller picture: already PS5'
+    if data != new:
+        _keep_and_write(path, new)
+    if new_css != css:
+        _keep_and_write(css_path, new_css)
+    return ('controller picture: DualSense photo, labels moved to match '
+            '(originals kept as controller.png%s, settings.css%s)' % (KEPT, KEPT))
 
 
 def undo_kept(folder, rel, what):
@@ -619,6 +555,7 @@ def undo(folder):
     out.append(undo_glyphs(folder))
     out.append(undo_kept(folder, SETTINGS_JS, 'button names'))
     out.append(undo_kept(folder, CONTROLLER_PIC, 'controller picture'))
+    out.append(undo_kept(folder, SETTINGS_CSS, 'controller labels'))
     out.append('dewrito_prefs.cfg: left as it is (change Game.CEFGpuEnable back by hand if wanted)')
     return out
 
