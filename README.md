@@ -78,6 +78,39 @@ the same lines to the debug output, which Playden's verbose log shows.
 - `Game.CEFGpuEnable "0"`: draw the web UI in software.
 - `Settings.Gamepad "1"`: controller support.
 
+### The button glyphs
+
+The web screens show controller prompts as PNGs in `ui/assets/buttons`
+(`360_A.png`, `360_LB.png`, ...). The script replaces them with PS5 ones
+(Cross, Circle, Square, Triangle, L1/R1, L2/R2, L3/R3, Options, Create,
+D-pad), which it draws itself, each at the pixel size of the icon it replaces.
+The originals are kept in `ui/assets/buttons_xbox_orig` and `--undo` puts
+them back. `--no-glyphs` skips this step.
+
+To use your own art, put PNGs named after the Xbox button
+(`A.png`, `LB.png`, `LS_Click.png`, `Start.png`, `Dpad_Up.png`, ...) in a
+`ps5_glyphs` folder next to the script; those are used instead of the drawn
+ones.
+
+Settings > Controls also named the Xbox buttons, so the same step changes two
+more files:
+
+- `ui/screens/settings/settings.js`: the binding drop-downs list Cross,
+  Circle, Square, Triangle, L1, R1, L2, R2, L3, R3, Options and Create. Only
+  the displayed text changes; the page still sends the game `A`, `LB`, ...
+  The original is kept as `settings.js.xbox_orig`.
+- `ui/assets/settings/controller.png`: the Xbox One photo becomes a drawing
+  of a DualSense. Its label lines leave the picture where the photo's did, so
+  the page's labels still line up. The original is kept as
+  `controller.png.xbox_orig`. A `controller.png` (1024x670) in `ps5_glyphs`
+  is used instead of the drawing.
+
+The names assume the usual mapping: Back is Create and Start is Options.
+
+This covers the web screens only. Prompts drawn by the original game UI (the
+main menu's own button bar, in-game HUD prompts) come from the game's font
+files and are not changed.
+
 ## Files
 
 | File | What it is |
