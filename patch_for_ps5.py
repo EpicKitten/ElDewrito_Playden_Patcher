@@ -21,7 +21,9 @@ What it does, each step only if not already done:
    by their PS5 names and the Xbox controller photo becomes a DualSense
    photo, with the labels around it moved to match (originals kept as
    settings.js.xbox_orig, controller.png.xbox_orig, settings.css.xbox_orig).
-   Skip all of this with --no-glyphs.
+   The original game's own menus get PS5 glyphs too: the Xbox button
+   characters in maps/fonts/font_package.bin are redrawn (original kept as
+   font_package.bin.xbox_orig). Skip all of this with --no-glyphs.
 
 It does not set the launch arguments. In Playden, give the game:
     --single-process --in-process-gpu
@@ -166,6 +168,7 @@ BACKUP_SUFFIX = '_xbox_orig'            # ui/assets/buttons_xbox_orig
 GLYPH_OVERRIDES = os.path.join(HERE, 'ps5_glyphs')
 ICON_SETS = ('360', 'XboxOne')
 WHITE = (255, 255, 255)
+KEPT = '.xbox_orig'                      # put after a file's name for its original
 
 
 def _seg(p, a, b):
@@ -301,11 +304,12 @@ GLYPHS = {
 }
 
 
-def _png(layers, width=100, height=100):
-    """Draw the layers (distance function, colour), in order, as an RGBA PNG.
-    The layers are laid out on a 100x100 square, scaled to fit and centred."""
-    scale = min(width, height) / 100.0
-    ox, oy = (width - 100 * scale) / 2.0, (height - 100 * scale) / 2.0
+def _raster(layers, width, height, design_w=100.0, design_h=100.0):
+    """Draw the layers (distance function, colour), in order. The layers are
+    laid out on design_w x design_h, scaled to fit width x height and centred.
+    Returns one (r, g, b, a) per pixel, 0..255, row by row."""
+    scale = min(width / design_w, height / design_h)
+    ox, oy = (width - design_w * scale) / 2.0, (height - design_h * scale) / 2.0
     zero = bytes(4 * width * height)
     red, green, blue, alpha = (array('f', zero) for _ in range(4))   # premultiplied
     for f, (cr, cg, cb) in layers:
@@ -324,17 +328,25 @@ def _png(layers, width=100, height=100):
                         blue[i] = blue[i] * keep + cb * cov
                         alpha[i] = alpha[i] * keep + cov
                 i += 1
+    out = []
+    for i in range(width * height):
+        a = alpha[i]
+        if a > 0:
+            out.append((min(255, int(red[i] / a + 0.5)), min(255, int(green[i] / a + 0.5)),
+                        min(255, int(blue[i] / a + 0.5)), min(255, int(a * 255 + 0.5))))
+        else:
+            out.append((0, 0, 0, 0))
+    return out
 
+
+def _png(layers, width=100, height=100):
+    """The layers, laid out on a 100x100 square, as an RGBA PNG."""
+    pixels = _raster(layers, width, height)
     rows = bytearray()
     for y in range(height):
         rows.append(0)                                   # filter: none
-        for i in range(y * width, (y + 1) * width):
-            a = alpha[i]
-            if a > 0:
-                rows += bytes((min(255, int(red[i] / a + 0.5)), min(255, int(green[i] / a + 0.5)),
-                               min(255, int(blue[i] / a + 0.5)), min(255, int(a * 255 + 0.5))))
-            else:
-                rows += b'\0\0\0\0'
+        for pixel in pixels[y * width:(y + 1) * width]:
+            rows += bytes(pixel)
 
     def chunk(kind, body):
         return (struct.pack('>I', len(body)) + kind + body
@@ -417,6 +429,215 @@ def patch_glyphs(folder):
     return msg
 
 
+# --- PS5 button glyphs in the original game's menus ---------------------------
+#
+# The game's own menus and HUD (not web pages) print button prompts as
+# characters U+E100.. of maps/fonts/font_package.bin, in the fonts conduit-16
+# and conduit-18. The file is a 0x8000-byte header block followed by
+# 0x8000-byte packages; a package starts with (header size, character count,
+# ...) as 16-bit values and a table of (font << 16 | character, offset). A
+# character is six 16-bit values (advance width, packed size, bitmap width,
+# bitmap height, origin x, origin y) and its packed pixels:
+#
+#   00 hi lo   one pixel, ARGB4444; its colour stays current for what follows
+#   01..3f     that many transparent pixels
+#   41..7f     (byte & 3f) opaque pixels of the current colour
+#   80..bf     10aaa000: one pixel of the current colour, alpha a/7
+#              (the other low bits add a run; not written here)
+#   c0..ff     11aaabbb: two pixels of the current colour, alphas a/7 and b/7
+#
+# Each Xbox glyph is overwritten in place by a DualSense one with the same
+# metrics, so nothing else in the file moves; a glyph that would not fit in
+# the bytes of the one it replaces is left alone.
+
+FONT_PACKAGE = os.path.join('maps', 'fonts', 'font_package.bin')
+RING = (214, 218, 226)
+DISC = (38, 40, 48)
+
+
+def _font_face(symbol, colour):
+    def make(w, filled):
+        cx, r = w / 2.0, min(w, 100) / 2.0 - 5
+        layers = [(_disc((cx, 50), r), DISC)] if filled else []
+        return layers + [(_outline(_disc((cx, 50), r), 8), RING), (symbol(cx), colour)]
+    return make
+
+
+def _font_label(label, radius):
+    def make(w, filled):
+        cx = w / 2.0
+        half = (min(cx - 4, 54), 38)
+        return [(_outline(_box((cx, 50), half, radius), 8), WHITE),
+                (_text(label, (cx, 51), 40, 9), WHITE)]
+    return make
+
+
+def _font_stick(label):
+    def make(w, filled):
+        cx = w / 2.0
+        return [(_outline(_disc((cx, 50), 43), 8), WHITE),
+                (_text(label, (cx, 51), 44 if len(label) == 1 else 34, 9), WHITE)]
+    return make
+
+
+def _font_plain(layers):
+    def make(w, filled):
+        dx = w / 2.0 - 50
+        return [(lambda p, f=f: f((p[0] - dx, p[1])), colour) for f, colour in layers()]
+    return make
+
+
+# character -> (PS5 name, drawing for a bitmap 100 high and w wide)
+FONT_GLYPHS = {
+    0xE100: ('Cross', _font_face(lambda cx: lambda p: min(
+        _line([(cx - 18, 32), (cx + 18, 68)], 10)(p), _line([(cx - 18, 68), (cx + 18, 32)], 10)(p)),
+        (124, 178, 232))),
+    0xE101: ('Circle', _font_face(lambda cx: _outline(_disc((cx, 50), 19), 10), (255, 102, 102))),
+    0xE102: ('Square', _font_face(lambda cx: _outline(_box((cx, 50), (17, 17), 2), 10), (234, 130, 220))),
+    0xE103: ('Triangle', _font_face(lambda cx: _line(
+        [(cx, 27), (cx + 22, 64), (cx - 22, 64)], 10, closed=True), (64, 226, 160))),
+    0xE104: ('L1', _font_label('L1', 14)),
+    0xE105: ('R1', _font_label('R1', 14)),
+    0xE106: ('L2', _font_label('L2', 26)),
+    0xE107: ('R2', _font_label('R2', 26)),
+    0xE10C: ('Options', _font_plain(_options)),
+    0xE10D: ('Create', _font_plain(_create)),
+    0xE10E: ('L3', _font_stick('L3')),
+    0xE10F: ('R3', _font_stick('R3')),
+    0xE110: ('L', _font_stick('L')),
+    0xE111: ('R', _font_stick('R')),
+    0xE133: ('L', _font_stick('L')), 0xE134: ('L', _font_stick('L')), 0xE135: ('L', _font_stick('L')),
+    0xE136: ('R', _font_stick('R')), 0xE137: ('R', _font_stick('R')), 0xE138: ('R', _font_stick('R')),
+}
+
+
+def pack_pixels(pixels):
+    """Font-package pixel data for a list of (r, g, b, a), 0..255."""
+    quads = [((a * 15 + 127) // 255, (r * 15 + 127) // 255, (g * 15 + 127) // 255,
+              (b * 15 + 127) // 255) for r, g, b, a in pixels]
+    out, i, n, current = bytearray(), 0, len(quads), None
+    while i < n:
+        a, rgb = quads[i][0], quads[i][1:]
+        if a == 0:
+            j = i
+            while j < n and quads[j][0] == 0 and j - i < 0x3f:
+                j += 1
+            out.append(j - i)
+            i = j
+        elif rgb != current:
+            out += bytes((0, a << 4 | rgb[0], rgb[1] << 4 | rgb[2]))
+            current = rgb
+            i += 1
+        elif a == 15:
+            j = i
+            while j < n and quads[j] == quads[i] and j - i < 0x3f:
+                j += 1
+            out.append(0x40 | (j - i))
+            i = j
+        else:
+            a3 = (a * 7 + 7) // 15
+            nxt = quads[i + 1] if i + 1 < n else None
+            if nxt and (nxt[0] == 0 or nxt[1:] == current):
+                out.append(0xc0 | a3 << 3 | (nxt[0] * 7 + 7) // 15)
+                i += 2
+            else:
+                out.append(0x80 | a3 << 3)
+                i += 1
+    return bytes(out)
+
+
+def unpacked_length(data):
+    """How many pixels font-package pixel data holds, or -1 if it is cut short."""
+    runs = (0, 4, 3, 2, 5, 4, 3, 2)
+    count, i = 0, 0
+    while i < len(data):
+        b = data[i]
+        i += 1
+        if b == 0:
+            i += 2
+            count += 1
+        elif b < 0x80:
+            count += b & 0x3f
+        elif b < 0xc0:
+            count += 1 + runs[b & 7]
+        else:
+            count += 2
+    return count if i == len(data) else -1
+
+
+def ps5_font_package(data):
+    """(patched font package, glyphs replaced, glyphs left alone), or None if
+    the file is not laid out as expected."""
+    if len(data) < 0x10000 or len(data) % 0x8000 or data[:4] != b'\x03\x00\x00\xc0':
+        return None
+    packages = struct.unpack_from('<I', data, 0x114)[0]
+    if (packages + 1) * 0x8000 != len(data):
+        return None
+    found, left = {}, 0                                  # font -> [(place, size, w, h, glyph)]
+    for package in range(1, packages + 1):
+        base = package * 0x8000
+        table, count = struct.unpack_from('<HH', data, base)
+        if table + 8 * count > 0x8000:
+            return None
+        for n in range(count):
+            key, offset = struct.unpack_from('<II', data, base + table + 8 * n)
+            glyph = FONT_GLYPHS.get(key & 0xffff)
+            if not glyph:
+                continue
+            at = base + offset
+            if offset + 12 > 0x8000:
+                return None
+            size, w, h = struct.unpack_from('<Hhh', data, at + 2)
+            if (offset + 12 + size > 0x8000 or not 8 <= w <= 128 or not 8 <= h <= 128
+                    or unpacked_length(data[at + 12:at + 12 + size]) != w * h):
+                left += 1
+                continue
+            found.setdefault(key >> 16, []).append((at, size, w, h, glyph))
+
+    out, done, drawn = bytearray(data), 0, {}
+
+    def packed(glyph, w, h, filled):
+        if (glyph[0], w, h, filled) not in drawn:
+            layers = glyph[1](100.0 * w / h, filled)
+            drawn[glyph[0], w, h, filled] = pack_pixels(_raster(layers, w, h, 100.0 * w / h, 100.0))
+        return drawn[glyph[0], w, h, filled]
+
+    for glyphs in found.values():
+        # filled face buttons pack bigger; a font gets them only if all of its fit
+        filled = all(len(packed(glyph, w, h, True)) <= size for at, size, w, h, glyph in glyphs)
+        for at, size, w, h, glyph in glyphs:
+            new = packed(glyph, w, h, filled)
+            if len(new) > size:
+                left += 1
+                continue
+            struct.pack_into('<H', out, at + 2, len(new))
+            out[at + 12:at + 12 + size] = new + bytes(size - len(new))
+            done += 1
+    return bytes(out), done, left
+
+
+def patch_font_package(folder):
+    path = os.path.join(folder, FONT_PACKAGE)
+    if not os.path.isfile(path):
+        return 'game menu glyphs: %s not found, skipped' % FONT_PACKAGE
+    with open(path, 'rb') as f:
+        current = f.read()
+    original = current
+    if os.path.exists(path + KEPT):                      # always start from the Xbox file
+        with open(path + KEPT, 'rb') as f:
+            original = f.read()
+    result = ps5_font_package(original)
+    if result is None or not result[1]:
+        return 'game menu glyphs: %s is not as expected, left alone' % FONT_PACKAGE
+    new, done, left = result
+    if new == current:
+        return 'game menu glyphs: already PS5'
+    _keep_and_write(path, new)
+    msg = ('game menu glyphs: %d glyphs replaced with PS5 ones in the game\'s fonts '
+           '(original kept as font_package.bin%s)' % (done, KEPT))
+    return msg + ('; %d left alone' % left if left else '')
+
+
 # --- PS5 names and picture in Settings > Controls -----------------------------
 #
 # The controller tab lists the buttons by their Xbox names in every binding
@@ -428,7 +649,6 @@ def patch_glyphs(folder):
 # way round and its Options button on the right, so some labels also change
 # places in settings.css to keep the lines from crossing.
 
-KEPT = '.xbox_orig'
 SETTINGS_JS = os.path.join('ui', 'screens', 'settings', 'settings.js')
 NAME_OLD = b'opt.textContent = buttons[x];'
 NAME_NEW = (b"opt.textContent = ({A:'Cross',B:'Circle',X:'Square',Y:'Triangle',"
@@ -553,6 +773,7 @@ def undo(folder):
     else:
         out.append('binkw32.dll: bridge not installed, left alone')
     out.append(undo_glyphs(folder))
+    out.append(undo_kept(folder, FONT_PACKAGE, 'game menu glyphs'))
     out.append(undo_kept(folder, SETTINGS_JS, 'button names'))
     out.append(undo_kept(folder, CONTROLLER_PIC, 'controller picture'))
     out.append(undo_kept(folder, SETTINGS_CSS, 'controller labels'))
@@ -581,8 +802,8 @@ def main():
         # mtndew first: it refuses an unknown file before anything else is touched
         lines = [patch_mtndew(folder), install_bridge(folder), set_prefs(folder)]
         if not args.no_glyphs:
-            lines += [patch_glyphs(folder), patch_button_names(folder),
-                      patch_controller_pic(folder)]
+            lines += [patch_glyphs(folder), patch_font_package(folder),
+                      patch_button_names(folder), patch_controller_pic(folder)]
     for line in lines:
         print('  ' + line)
     if not args.undo:
