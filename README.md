@@ -7,37 +7,77 @@ screens, are also swapped for PS5 ones.
 
 Worked out and tested on Playden 0.11.0-beta.4 (kit 0.25), firmware 12.20.
 
-## Quick start
+## How to use it
 
-1. On a PC, patch a clean ElDewrito 0.7.1 folder:
+You need:
 
-   ```
-   python patch_for_ps5.py "D:\path\to\ElDewrito_0.7.1"
-   ```
+- A PC with Python 3 (nothing else to install).
+- A clean copy of ElDewrito 0.7.1: the folder that holds `eldorado.exe`.
+- This repository, downloaded or cloned as a whole. The script uses
+  `dewbridge.dll` and `dualsense_controller.png` from its own folder.
+- A PS5 with Playden.
 
-2. Import that folder into Playden.
-3. In Playden's settings for the game, set the program arguments to:
+### 1. Patch the game folder on the PC
+
+Open a terminal in this repository's folder and give the script the game
+folder:
+
+```
+python patch_for_ps5.py "D:\path\to\ElDewrito_0.7.1"
+```
+
+It changes the folder in place and prints one line per step. A first run
+looks like this:
+
+```
+D:\path\to\ElDewrito_0.7.1
+  mtndew.dll: patched (original kept as mtndew.dll.orig)
+  binkw32.dll: bridge installed (original kept as binkw32_orig.dll)
+  dewrito_prefs.cfg: set Game.CEFGpuEnable "0", Settings.Gamepad "1"
+  button glyphs: 19 icons replaced with PS5 ones (originals kept in ui\assets\buttons_xbox_orig)
+  game menu glyphs: 40 glyphs replaced with PS5 ones in the game's fonts (original kept as font_package.bin.xbox_orig)
+  button names: PS5 names in the controller settings (original kept as settings.js.xbox_orig)
+  controller picture: DualSense photo, labels moved to match (originals kept as controller.png.xbox_orig, settings.css.xbox_orig)
+In Playden, set the program arguments to: --single-process --in-process-gpu
+```
+
+What the lines can say:
+
+- `already ...`: that step was done on an earlier run. Running the script
+  again is safe; it only does what is missing.
+- `... skipped` or `... left alone`: a file was missing or not the one the
+  script expects, so that step changed nothing. The other steps still run.
+- If the script stops with `mtndew.dll is not the 0.7.1 file this patch was
+  made for`, nothing was changed: the folder is not a clean 0.7.1. The script
+  checks that file by hash before it touches anything.
+
+### 2. Put it on the PS5
+
+1. Import the patched folder into Playden.
+2. In Playden's settings for the game, set the program arguments to:
 
    ```
    --single-process --in-process-gpu
    ```
 
-4. Launch.
+   The script cannot set these for you, and the game shows a black screen
+   without them.
+3. Launch the game.
 
-Run the script again at any time; it skips what is already done.
+### Options
 
-| Option | What it does |
+| Command | What it does |
 | --- | --- |
-| `--no-glyphs` | Leaves the Xbox button icons, button names and controller picture as they are |
-| `--undo` | Puts back the original DLLs, `font_package.bin`, button icons, `settings.js`, `settings.css` and controller picture. `dewrito_prefs.cfg` is left as it is |
+| `python patch_for_ps5.py "<folder>"` | Applies everything |
+| `python patch_for_ps5.py "<folder>" --no-glyphs` | Applies the fixes only, and leaves every Xbox button glyph, button name and the controller picture as they are |
+| `python patch_for_ps5.py "<folder>" --undo` | Puts back the original DLLs, `font_package.bin`, button icons, `settings.js`, `settings.css` and controller picture. `dewrito_prefs.cfg` is left as it is |
 
-```
-python patch_for_ps5.py "D:\path\to\ElDewrito_0.7.1" --undo
-```
+To go from PS5 glyphs back to Xbox ones while keeping the fixes, run
+`--undo` and then run the script again with `--no-glyphs`.
 
-The script needs Python 3 and nothing else. It only accepts the exact 0.7.1
-`mtndew.dll` (checked by hash) and stops before changing anything if the file
-is different.
+To use your own button art instead of the drawn glyphs, see
+[Using your own art](#using-your-own-art). To try the patched folder on the
+PC first, see [Testing on a PC](#testing-on-a-pc).
 
 ## What is wrong, and what each fix does
 
