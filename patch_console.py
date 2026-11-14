@@ -33,7 +33,9 @@ BACKUP = os.path.join(patcher.HERE, 'console_backup')
 SETTINGS = 'ui/screens/settings/'
 FILES = ['mtndew.dll', 'binkw32.dll', 'binkw32_orig.dll', 'data/dewrito_prefs.cfg',
          'maps/fonts/font_package.bin', SETTINGS + 'settings.js', SETTINGS + 'settings.css',
-         'ui/assets/settings/controller.png']
+         'ui/assets/settings/controller.png', patcher.GLYPH_SWITCH]
+# files the patcher makes that have no original
+ADDED = ['binkw32_orig.dll', patcher.GLYPH_SWITCH]
 BUTTONS = 'ui/assets/buttons'
 
 
@@ -138,16 +140,16 @@ def patch(console, game, backup, args):
 
         steps = [patcher.patch_mtndew, patcher.install_bridge, patcher.set_prefs]
         if not args.no_glyphs:
-            steps += [patcher.patch_glyphs, patcher.patch_font_package,
+            steps += [patcher.patch_glyphs, patcher.patch_font_package, patcher.patch_bridge_glyphs,
                       patcher.patch_button_names, patcher.patch_controller_pic]
         for step in steps:
             print('  ' + step(mirror))
         after = read_tree(mirror)
 
     # what the patcher keeps as originals stays on this PC, except the real
-    # Bink DLL, which the bridge needs beside it
+    # Bink DLL, which the bridge needs beside it; the glyph switch is new too
     send = [rel for rel in sorted(after) if after[rel] != before.get(rel)
-            and (rel in before or rel == 'binkw32_orig.dll')]
+            and (rel in before or rel in ADDED)]
     if not send:
         print('Nothing to send: the console copy is already patched.')
         return
@@ -155,7 +157,10 @@ def patch(console, game, backup, args):
         print('  %s %s (%d bytes)' % ('would send' if args.dry_run else 'sending', rel, len(after[rel])))
         if args.dry_run:
             continue
-        if rel in before and not os.path.exists(os.path.join(backup, rel)):
+        # an older bridge is not an original: kept, it would make --undo put it
+        # back and remove the Bink DLL it needs
+        older_bridge = rel == 'binkw32.dll' and b'dewbridge: ' in before.get(rel, b'')
+        if rel in before and not older_bridge and not os.path.exists(os.path.join(backup, rel)):
             write_file(os.path.join(backup, rel), before[rel])
         console.put(game + '/' + rel, after[rel])
     if not args.dry_run:
@@ -171,10 +176,13 @@ def undo(console, game, backup, args):
         print('  %s %s' % ('would restore' if args.dry_run else 'restoring', rel))
         if not args.dry_run:
             console.put(game + '/' + rel, kept[rel])
-    if 'binkw32.dll' in kept:                            # the bridge is gone: so is its partner
-        print('  %s binkw32_orig.dll' % ('would remove' if args.dry_run else 'removing'))
+    # the glyph switch goes; the real Bink DLL only if the bridge went with it
+    for rel in ADDED:
+        if rel == 'binkw32_orig.dll' and 'binkw32.dll' not in kept:
+            continue
+        print('  %s %s' % ('would remove' if args.dry_run else 'removing', rel))
         if not args.dry_run:
-            console.rm(game + '/binkw32_orig.dll')
+            console.rm(game + '/' + rel)
     if not args.dry_run:
         shutil.rmtree(backup)
         print('Restored %d files.' % len(kept))

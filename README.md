@@ -36,6 +36,7 @@ D:\path\to\ElDewrito_0.7.1
   dewrito_prefs.cfg: set Game.CEFGpuEnable "0", Settings.Gamepad "1"
   button glyphs: 19 icons replaced with PS5 ones (originals kept in ui\assets\buttons_xbox_orig)
   game menu glyphs: 40 glyphs replaced with PS5 ones in the game's fonts (original kept as font_package.bin.xbox_orig)
+  mod font glyphs: the bridge will draw PS5 glyphs into fonts as they load (dewbridge_ps5_glyphs.txt)
   button names: PS5 names in the controller settings (original kept as settings.js.xbox_orig)
   controller picture: DualSense photo, labels moved to match (originals kept as controller.png.xbox_orig, settings.css.xbox_orig)
 In Playden, set the program arguments to: --single-process --in-process-gpu
@@ -93,7 +94,7 @@ payload (`ps5loop`, port 9112) loaded on the console, and the game closed.
 | --- | --- |
 | `python patch_for_ps5.py "<folder>"` | Applies everything |
 | `python patch_for_ps5.py "<folder>" --no-glyphs` | Applies the fixes only, and leaves every Xbox button glyph, button name and the controller picture as they are |
-| `python patch_for_ps5.py "<folder>" --undo` | Puts back the original DLLs, `font_package.bin`, button icons, `settings.js`, `settings.css` and controller picture. `dewrito_prefs.cfg` is left as it is |
+| `python patch_for_ps5.py "<folder>" --undo` | Puts back the original DLLs, `font_package.bin`, button icons, `settings.js`, `settings.css` and controller picture, and removes `dewbridge_ps5_glyphs.txt`. `dewrito_prefs.cfg` is left as it is |
 
 To go from PS5 glyphs back to Xbox ones while keeping the fixes, run
 `--undo` and then run the script again with `--no-glyphs`.
@@ -149,12 +150,14 @@ the same lines to the debug output, which Playden's verbose log shows.
 ## PS5 controls
 
 This part is cosmetic: the game runs without it, and `--no-glyphs` skips it.
-The game shows Xbox buttons in the original menus and HUD and in three places
-in the web screens, and the script changes each one.
+The game shows Xbox buttons in the original menus and HUD, in the fonts that
+mods bring with them, and in three places in the web screens, and the script
+changes each one.
 
 | What | File in the game folder | Becomes | Original kept as |
 | --- | --- | --- | --- |
 | Button glyphs in the original game's menus and HUD | `maps/fonts/font_package.bin` (40 glyphs) | PS5 glyphs with the same size and spacing | `font_package.bin.xbox_orig` |
+| Button glyphs in the fonts of mods | Nothing on disk: the bridge redraws them in memory while `dewbridge_ps5_glyphs.txt` is in the game folder | PS5 glyphs fitted to the outline of each Xbox glyph | The `.pak` is not changed |
 | Button icons in web-screen prompts | `ui/assets/buttons/360_*.png` (19 files) | PS5 glyphs, each at the pixel size of the icon it replaces | `ui/assets/buttons_xbox_orig/` |
 | Button names in the binding drop-downs of Settings > Controls | `ui/screens/settings/settings.js` | PS5 names | `settings.js.xbox_orig` |
 | Controller photo in Settings > Controls | `ui/assets/settings/controller.png` | A photo of a DualSense (`dualsense_controller.png`) | `controller.png.xbox_orig` |
@@ -183,6 +186,20 @@ Details:
   a ring with a coloured symbol and no dark fill, because the filled ones do
   not fit in the space of the Xbox ones. The format is described in a
   comment in `patch_for_ps5.py`.
+- A mod's `.pak` holds a font package of its own, which the game uses instead
+  of `font_package.bin` while the mod is loaded. ODST Anniversary
+  Multiplayer, for one, redraws the face buttons, bumpers and triggers of
+  conduit-18 at twice the size. A `.pak` cannot be patched on disk: its
+  SHA-1, which covers the fonts, is how the game and servers tell mods apart.
+  So the bridge does it in memory. The game reads a font in 32 KB blocks as
+  it needs them and checks each one with a function of `eldorado.exe`
+  (`0x65c880`); the bridge puts itself after that check and redraws the
+  button characters of the block, whichever file it came from. Each PS5
+  glyph is scaled to fit the outline of the Xbox glyph it replaces, and is
+  used only if it packs into no more bytes. This happens only while
+  `dewbridge_ps5_glyphs.txt` is in the game folder; the script puts it
+  there, and `--undo` removes it. The bridge says what it did in
+  `dewbridge.log`.
 - Only the displayed names change in `settings.js`. The page still sends the
   game `A`, `LB` and so on, so bindings and presets work as before. Preset
   names such as "Halo 3 Bumper Jumper" are not changed.
@@ -225,6 +242,9 @@ instead of the drawn version.
 | `dualsense_controller.png` | The DualSense photo, cut out and with label lines, that the script installs |
 | `make_controller_pic.py` | Rebuilds `dualsense_controller.png` from the original photo; needs Pillow |
 | `dewbridge.c` | The bridge's source |
+| `dewfont.c` | The part of the bridge that redraws button glyphs in loaded fonts |
+| `make_bridge_glyphs.py` | Writes `dewglyphs.h`, the PS5 glyphs built into the bridge, from the drawings in `patch_for_ps5.py`; run by `build.sh` |
+| `dewglyphs.h` | That generated file |
 | `build.sh` | Builds the bridge |
 | `patch_base.py` | Older script with only the `mtndew.dll` patch; superseded by `patch_for_ps5.py` |
 | `start-ps5-mode.bat` | Copy into the game folder; starts the PC copy with the PS5 arguments. Add `debug` for Chrome DevTools on `http://127.0.0.1:8884` |
@@ -279,6 +299,12 @@ Then open `http://127.0.0.1:8884` in a Chromium browser to inspect the pages.
   `font_package.bin`) were seen working in the Forge Lobby on a PC copy of
   0.7.1, not yet on the console. If the menus misbehave there, `--undo` puts
   the original back.
+- The in-memory glyphs for mods were checked two ways on a PC: the bridge's
+  drawing code was run on the font package taken out of the ODST Anniversary
+  Multiplayer `.pak` (all 40 glyphs replaced), and the bridge was seen
+  redrawing a block of the stock font in the running game. They have not
+  been seen in a match with a mod loaded, nor on the console. A glyph that
+  does not fit in the bytes of the one it replaces stays as it was.
 - The web-screen icons, the names, the controller photo and the label places
   were checked as files on that PC copy; they have not been seen in the
   running game or on the console.
