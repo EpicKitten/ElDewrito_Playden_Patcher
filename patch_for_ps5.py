@@ -23,7 +23,10 @@ What it does, each step only if not already done:
    settings.js.xbox_orig, controller.png.xbox_orig, settings.css.xbox_orig).
    The original game's own menus get PS5 glyphs too: the Xbox button
    characters in maps/fonts/font_package.bin are redrawn (original kept as
-   font_package.bin.xbox_orig). Skip all of this with --no-glyphs.
+   font_package.bin.xbox_orig). A mod's .pak brings its own fonts and cannot
+   be changed on disk, so dewbridge_ps5_glyphs.txt is also put in the game
+   folder: while it is there, the bridge redraws the button characters of
+   every font the game loads. Skip all of this with --no-glyphs.
 
 It does not set the launch arguments. In Playden, give the game:
     --single-process --in-process-gpu
@@ -638,6 +641,37 @@ def patch_font_package(folder):
     return msg + ('; %d left alone' % left if left else '')
 
 
+# --- PS5 button glyphs in the fonts of mods ------------------------------------
+#
+# A mod's .pak holds a font package of its own, which the game uses instead of
+# font_package.bin while the mod is loaded, and which may redraw the button
+# characters at other sizes. The .pak's hash covers it, and the hash is how
+# the game and servers tell mods apart, so the file is left as it is. The
+# bridge redraws the glyphs in memory instead, in each part of a font as the
+# game loads it (dewfont.c), when this file is in the game folder.
+
+GLYPH_SWITCH = 'dewbridge_ps5_glyphs.txt'
+GLYPH_SWITCH_TEXT = (b'While this file is here, the bridge (binkw32.dll) draws PS5 button glyphs\r\n'
+                     b'into the fonts the game loads, those of mods included. Made by patch_for_ps5.py.\r\n')
+
+
+def patch_bridge_glyphs(folder):
+    path = os.path.join(folder, GLYPH_SWITCH)
+    if os.path.isfile(path):
+        return 'mod font glyphs: already switched on'
+    with open(path, 'wb') as f:
+        f.write(GLYPH_SWITCH_TEXT)
+    return 'mod font glyphs: the bridge will draw PS5 glyphs into fonts as they load (%s)' % GLYPH_SWITCH
+
+
+def undo_bridge_glyphs(folder):
+    path = os.path.join(folder, GLYPH_SWITCH)
+    if not os.path.isfile(path):
+        return 'mod font glyphs: not switched on, left alone'
+    os.remove(path)
+    return 'mod font glyphs: switched off (%s removed)' % GLYPH_SWITCH
+
+
 # --- PS5 names and picture in Settings > Controls -----------------------------
 #
 # The controller tab lists the buttons by their Xbox names in every binding
@@ -774,6 +808,7 @@ def undo(folder):
         out.append('binkw32.dll: bridge not installed, left alone')
     out.append(undo_glyphs(folder))
     out.append(undo_kept(folder, FONT_PACKAGE, 'game menu glyphs'))
+    out.append(undo_bridge_glyphs(folder))
     out.append(undo_kept(folder, SETTINGS_JS, 'button names'))
     out.append(undo_kept(folder, CONTROLLER_PIC, 'controller picture'))
     out.append(undo_kept(folder, SETTINGS_CSS, 'controller labels'))
@@ -802,7 +837,7 @@ def main():
         # mtndew first: it refuses an unknown file before anything else is touched
         lines = [patch_mtndew(folder), install_bridge(folder), set_prefs(folder)]
         if not args.no_glyphs:
-            lines += [patch_glyphs(folder), patch_font_package(folder),
+            lines += [patch_glyphs(folder), patch_font_package(folder), patch_bridge_glyphs(folder),
                       patch_button_names(folder), patch_controller_pic(folder)]
     for line in lines:
         print('  ' + line)
