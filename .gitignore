@@ -1,0 +1,3 @@
+__pycache__/
+# originals of the console's files, kept by patch_console.py
+console_backup/

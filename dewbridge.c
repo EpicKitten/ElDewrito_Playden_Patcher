@@ -10,6 +10,9 @@
  * and adds a render process handler to the game's CefApp that speaks the same
  * process-message protocol as the router's browser side inside mtndew.dll.
  *
+ * It also draws PS5 button glyphs into the game's fonts as they are loaded
+ * (see dewfont.c), if dewbridge_ps5_glyphs.txt is in the game folder.
+ *
  * Freestanding: no C runtime, kernel32 only. 32-bit x86.
  */
 
@@ -548,9 +551,63 @@ static void install(void)
 	logline("cef_initialize not found in mtndew.dll's delay imports", 0, 0);
 }
 
+/* ---- PS5 button glyphs in the game's fonts ---- */
+
+#include "dewfont.c"
+
+/* eldorado.exe 0.7.1, which always loads at 0x400000: the function that
+ * checks a font block that has just been read. mtndew.dll's font loader calls
+ * it for every block, whether the block came from font_package.bin or from a
+ * mod's .pak. It starts: push ebp; mov ebp,esp; push ecx; push ebx; push esi;
+ * mov esi,[ebp+8]. */
+#define FONT_CHECK 0x65c880
+#define GLYPH_SWITCH "dewbridge_ps5_glyphs.txt"
+static const unsigned char font_check_head[] = { 0x55, 0x8b, 0xec, 0x51, 0x53, 0x56, 0x8b, 0x75, 0x08 };
+
+/* the first four instructions of that function, then the rest of it */
+__attribute__((naked)) static unsigned char game_font_check(__attribute__((unused)) unsigned char *block)
+{
+	__asm__("push %ebp; mov %esp, %ebp; push %ecx; push %ebx; push $0x65c885; ret");
+}
+
+static volatile long font_busy;
+
+static unsigned char hooked_font_check(unsigned char *block)
+{
+	static int said;
+	unsigned char ok = game_font_check(block);
+	if (ok) {
+		int n;
+		while (__sync_lock_test_and_set(&font_busy, 1)) ;
+		n = font_block_ps5(block);
+		__sync_lock_release(&font_busy);
+		if (n && said < 8) { said++; logline("PS5 glyphs drawn into a loaded font block:", (unsigned)n, 1); }
+	}
+	return ok;
+}
+
+static void install_fonts(void)
+{
+	unsigned char *at = (unsigned char *)FONT_CHECK;
+	DWORD old;
+	unsigned i;
+	HANDLE h = CreateFileA(GLYPH_SWITCH, 0x80000000 /* GENERIC_READ */, 7, 0, 3 /* OPEN_EXISTING */, 0, 0);
+
+	if (h == (HANDLE)-1) { logline("no " GLYPH_SWITCH ": fonts keep the button glyphs they have", 0, 0); return; }
+	CloseHandle(h);
+	if (GetModuleHandleA(0) != (HANDLE)0x400000) { logline("the game is not at 0x400000: fonts left alone", 0, 0); return; }
+	for (i = 0; i < sizeof(font_check_head); i++)
+		if (at[i] != font_check_head[i]) { logline("the font check is not the 0.7.1 code: fonts left alone", 0, 0); return; }
+	if (!VirtualProtect(at, 5, 0x40 /* PAGE_EXECUTE_READWRITE */, &old)) { logline("cannot unprotect the font check", 0, 0); return; }
+	at[0] = 0xe9; /* jmp hooked_font_check */
+	*(DWORD *)(at + 1) = (DWORD)hooked_font_check - (FONT_CHECK + 5);
+	VirtualProtect(at, 5, old, &old);
+	logline("hooked the game's font check: button glyphs become PS5 ones as fonts load", 0, 0);
+}
+
 BOOL WINAPI DllMain(HANDLE module, DWORD reason, void *reserved)
 {
 	(void)module; (void)reserved;
-	if (reason == 1 /* DLL_PROCESS_ATTACH */) install();
+	if (reason == 1 /* DLL_PROCESS_ATTACH */) { install(); install_fonts(); }
 	return 1;
 }

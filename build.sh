@@ -44,6 +44,9 @@ for i in range(nnames):
     print('/export:%s=binkw32_orig.%s,@%d' % (name, name, o))
 EOF
 
+# the PS5 glyphs dewfont.c draws into the game's fonts
+python3 make_bridge_glyphs.py > dewglyphs.h
+
 clang-18 -target i686-pc-windows-msvc -std=c11 -Os -ffreestanding -fno-builtin \
 	-fno-stack-protector -mno-stack-arg-probe -Wall -Wextra -c dewbridge.c -o dewbridge.obj
 lld-link-18 /dll /machine:x86 /nodefaultlib /entry:DllMain /safeseh:no /out:binkw32.dll \
